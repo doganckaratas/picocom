@@ -29,27 +29,39 @@
 #include <errno.h>
 #include <stdarg.h>
 
+#include "logger.h"
+#include <time.h>
+#include <sys/time.h>
+
 /**********************************************************************/
 
 ssize_t
 writen_ni(int fd, const void *buff, size_t n)
 {
-    size_t nl;
-    ssize_t nw;
-    const char *p;
+    int char_pos = 0, ret = 0;
+    time_t raw;
+    struct tm *t;
+    struct timeval tv;
+    time(&raw);
+    t = localtime(&raw);
+    gettimeofday(&tv, NULL);
 
-    p = buff;
-    nl = n;
-    while (nl > 0) {
-        do {
-            nw = write(fd, p, nl);
-        } while ( nw < 0 && errno == EINTR );
-        if ( nw <= 0 ) break;
-        nl -= nw;
-        p += nw;
+    for (char_pos = 0; char_pos < n; char_pos++) {
+        switch(((char *)buff)[char_pos]) {
+        case '\n':
+            if (logger_timestamp_e == LOGGER_TIMESTAMP_COMPLEX)
+                ret += dprintf(fd, "\n[%04d-%02d-%02d %02d:%02d:%02d.%03ld] ", t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, tv.tv_usec / 1000);
+            else if (logger_timestamp_e == LOGGER_TIMESTAMP_SIMPLE)
+                ret += dprintf(fd, "\n[%02d:%02d:%02d] ", t->tm_hour, t->tm_min, t->tm_sec);
+            else if (logger_timestamp_e == LOGGER_TIMESTAMP_NONE)
+                ret += dprintf(fd, "\n");
+            break;
+        default:
+            ret += dprintf(fd, "%c", ((char *)buff)[char_pos]);
+        }
     }
 
-    return n - nl;
+    return ret;
 }
 
 int

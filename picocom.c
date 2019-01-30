@@ -56,6 +56,7 @@
 #endif
 
 #include "custbaud.h"
+#include "logger.h"
 
 /**********************************************************************/
 
@@ -88,7 +89,7 @@ const char *flow_str[] = {
 #define KEY_EXIT    CKEY('x') /* exit picocom */
 #define KEY_QUIT    CKEY('q') /* exit picocom without reseting port */
 #define KEY_PULSE   CKEY('p') /* pulse DTR */
-#define KEY_TOG_DTR CKEY('t') /* toggle DTR */
+#define KEY_TOG_DTR CKEY('k') /* toggle DTR */
 #define KEY_TOG_RTS CKEY('g') /* toggle RTS */
 #define KEY_BAUD    CKEY('b') /* set baudrate */
 #define KEY_BAUD_UP CKEY('u') /* increase baudrate (up) */
@@ -100,10 +101,11 @@ const char *flow_str[] = {
 #define KEY_LECHO   CKEY('c') /* toggle local echo */
 #define KEY_STATUS  CKEY('v') /* show program options */
 #define KEY_HELP    CKEY('h') /* show help (same as [C-k]) */
-#define KEY_KEYS    CKEY('k') /* show available command keys */
 #define KEY_SEND    CKEY('s') /* send file */
 #define KEY_RECEIVE CKEY('r') /* receive file */
 #define KEY_HEX     CKEY('w') /* write hex */
+#define KEY_LOG     CKEY('l') /* enable/disable log */
+#define KEY_STAMP   CKEY('t') /* enable/disable timestamp */
 #define KEY_BREAK   CKEY('\\') /* break */
 
 /**********************************************************************/
@@ -211,6 +213,7 @@ struct {
     int omap;
     int emap;
     char *log_filename;
+    enum logger_timestamp_mode timestamp;
     char *initstring;
     int exit_after;
     int exit;
@@ -241,6 +244,7 @@ struct {
     .omap = M_O_DFL,
     .emap = M_E_DFL,
     .log_filename = NULL,
+    .timestamp = LOGGER_TIMESTAMP_SIMPLE,
     .initstring = NULL,
     .exit_after = -1,
     .exit = 0,
@@ -1052,6 +1056,10 @@ show_keys()
               KEYC(KEY_STATUS));
     fd_printf(STO, "*** [C-%c] : Show this message\r\n",
               KEYC(KEY_HELP));
+    fd_printf(STO, "*** [C-%c] : Toggle timestamps\r\n",
+              KEYC(KEY_STAMP));
+    fd_printf(STO, "*** [C-%c] : Toggle log file\r\n",
+              KEYC(KEY_LOG));
     fd_printf(STO, "\r\n");
 #else /* defined NO_HELP */
     fd_printf(STO, "*** Help is disabled.\r\n");
@@ -1232,7 +1240,6 @@ do_command (unsigned char c)
         show_status(0);
         break;
     case KEY_HELP:
-    case KEY_KEYS:
         show_keys();
         break;
     case KEY_PULSE:
@@ -1373,6 +1380,21 @@ do_command (unsigned char c)
         if ( tty_q_push((char *)hexbuf, n) != n )
             fd_printf(STO, "*** output buffer full ***\r\n");
         fd_printf(STO, "*** wrote %d bytes ***\r\n", n);
+        break;
+    case KEY_LOG:
+        fd_printf(STO, "*** KEY_LOG acquired! ***\r\n");
+        break;
+    case KEY_STAMP:
+        if (logger_timestamp_e == LOGGER_TIMESTAMP_SIMPLE) {
+                logger_timestamp_e = LOGGER_TIMESTAMP_COMPLEX;
+                fd_printf(STO, "\r\n*** changed timestamp to complex ***\r\n");
+        } else if (logger_timestamp_e == LOGGER_TIMESTAMP_COMPLEX) {
+                logger_timestamp_e = LOGGER_TIMESTAMP_NONE;
+                fd_printf(STO, "\r\n*** changed timestamp to none ***\r\n");
+        } else if (logger_timestamp_e == LOGGER_TIMESTAMP_NONE) {
+                logger_timestamp_e = LOGGER_TIMESTAMP_SIMPLE;
+                fd_printf(STO, "\r\n*** changed timestamp to simple ***\r\n");
+        }
         break;
     case KEY_BREAK:
         term_break(tty_fd);
@@ -1527,10 +1549,12 @@ loop(void)
                 if ( opts.log_filename )
                     if ( writen_ni(log_fd, buff_rd, n) < n )
                         fatal("write to logfile failed: %s", strerror(errno));
+
                 for (i = 0; i < n; i++) {
                     bmp += do_map(bmp, opts.imap, buff_rd[i]);
                 }
                 n = bmp - buff_map;
+
                 if ( writen_ni(STO, buff_map, n) < n )
                     fatal("write to stdout failed: %s", strerror(errno));
             }
@@ -1643,14 +1667,15 @@ show_usage(char *name)
     printf("  --no<i>nit\n");
     printf("  --no<r>eset\n");
     printf("  --hang<u>p\n");
-    printf("  --no<l>ock\n");
+    printf("  --noloc<k>\n");
     printf("  --<s>end-cmd <command>\n");
     printf("  --recei<v>e-cmd <command>\n");
     printf("  --imap <map> (input mappings)\n");
     printf("  --omap <map> (output mappings)\n");
     printf("  --emap <map> (local-echo mappings)\n");
-    printf("  --lo<g>file <filename>\n");
-    printf("  --inits<t>ring <string>\n");
+    printf("  --<l>ogfile <filename>\n");
+    printf("  --<t>imestamp <mode>\n");
+    printf("  --initstrin<g> <string>\n");
     printf("  --e<x>it-after <msec>\n");
     printf("  --e<X>it\n");
     printf("  --lower-rts\n");
@@ -1702,14 +1727,15 @@ parse_args(int argc, char *argv[])
         {"noinit", no_argument, 0, 'i'},
         {"noreset", no_argument, 0, 'r'},
         {"hangup", no_argument, 0, 'u'},
-        {"nolock", no_argument, 0, 'l'},
+        {"nolock", no_argument, 0, 'k'},
         {"flow", required_argument, 0, 'f'},
         {"baud", required_argument, 0, 'b'},
         {"parity", required_argument, 0, 'y'},
         {"databits", required_argument, 0, 'd'},
         {"stopbits", required_argument, 0, 'p'},
-        {"logfile", required_argument, 0, 'g'},
-        {"initstring", required_argument, 0, 't'},
+        {"logfile", required_argument, 0, 'l'},
+        {"logstamp", required_argument, 0, 't'},
+        {"initstring", required_argument, 0, 'g'},
         {"exit-after", required_argument, 0, 'x'},
         {"exit", no_argument, 0, 'X'},
         {"lower-rts", no_argument, 0, 1},
@@ -1731,7 +1757,7 @@ parse_args(int argc, char *argv[])
         /* no default error messages printed. */
         opterr = 0;
 
-        c = getopt_long(argc, argv, "hirulcqXnv:s:r:e:f:b:y:d:p:g:t:x:",
+        c = getopt_long(argc, argv, "hirukcqXnv:s:r:e:f:b:y:d:p:g:l:t:x:",
                         longOptions, &optionIndex);
 
         if (c < 0)
@@ -1773,7 +1799,7 @@ parse_args(int argc, char *argv[])
         case 'u':
             opts.hangup = 1;
             break;
-        case 'l':
+        case 'k':
 #if defined (UUCP_LOCK_DIR) || defined (USE_FLOCK)
             opts.nolock = 1;
 #endif
@@ -1875,11 +1901,16 @@ parse_args(int argc, char *argv[])
                 break;
             }
             break;
-        case 'g':
+        case 'l':
             if ( opts.log_filename ) free(opts.log_filename);
             opts.log_filename = strdup(optarg);
             break;
         case 't':
+            if (strcmp(strdup(optarg), "simple") == 0) opts.timestamp = LOGGER_TIMESTAMP_SIMPLE;
+            else if (strcmp(strdup(optarg), "complex") == 0) opts.timestamp = LOGGER_TIMESTAMP_COMPLEX;
+            else opts.timestamp = LOGGER_TIMESTAMP_NONE;
+            break;
+        case 'g':
             if ( opts.initstring ) free(opts.initstring);
             opts.initstring = strdup(optarg);
             break;
@@ -1979,6 +2010,7 @@ parse_args(int argc, char *argv[])
     printf("omap is        : "); print_map(opts.omap);
     printf("emap is        : "); print_map(opts.emap);
     printf("logfile is     : %s\n", opts.log_filename ? opts.log_filename : "none");
+    printf("timestamp is   : %s\n", opts.timestamp == LOGGER_TIMESTAMP_SIMPLE ? "simple" : opts.timestamp == LOGGER_TIMESTAMP_COMPLEX ? "complex" : "none");
     if ( opts.initstring ) {
         printf("initstring len : %lu bytes\n",
                (unsigned long)strlen(opts.initstring));
@@ -2047,7 +2079,7 @@ main (int argc, char *argv[])
     int r;
 
     parse_args(argc, argv);
-
+    logger_timestamp_e = opts.timestamp;
     establish_signal_handlers();
 
     r = term_lib_init();
