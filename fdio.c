@@ -49,11 +49,11 @@ writen_ni(int fd, const void *buff, size_t n)
     for (char_pos = 0; char_pos < n; char_pos++) {
         switch(((char *)buff)[char_pos]) {
         case '\n':
-            if (logger_timestamp_e == LOGGER_TIMESTAMP_COMPLEX)
+            if (get_logger_mode() == LOGGER_TIMESTAMP_COMPLEX)
                 ret += dprintf(fd, "\n[%04d-%02d-%02d %02d:%02d:%02d.%03ld] ", t->tm_year + 1900, t->tm_mon + 1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, tv.tv_usec / 1000);
-            else if (logger_timestamp_e == LOGGER_TIMESTAMP_SIMPLE)
+            else if (get_logger_mode() == LOGGER_TIMESTAMP_SIMPLE)
                 ret += dprintf(fd, "\n[%02d:%02d:%02d] ", t->tm_hour, t->tm_min, t->tm_sec);
-            else if (logger_timestamp_e == LOGGER_TIMESTAMP_NONE)
+            else if (get_logger_mode() == LOGGER_TIMESTAMP_NONE)
                 ret += dprintf(fd, "\n");
             break;
         default:

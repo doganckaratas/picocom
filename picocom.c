@@ -155,6 +155,18 @@ struct map_names_s {
     { NULL, 0 }
 };
 
+static enum logger_timestamp_mode logger_timestamp_e = LOGGER_TIMESTAMP_NONE;
+
+enum logger_timestamp_mode get_logger_mode()
+{
+    return logger_timestamp_e;
+}
+
+void set_logger_mode(enum logger_timestamp_mode t)
+{
+    logger_timestamp_e = t;
+}
+
 int
 parse_map (char *s)
 {
@@ -1394,14 +1406,14 @@ do_command (unsigned char c)
         }
         break;
     case KEY_STAMP:
-        if (logger_timestamp_e == LOGGER_TIMESTAMP_SIMPLE) {
-                logger_timestamp_e = LOGGER_TIMESTAMP_COMPLEX;
+        if (get_logger_mode() == LOGGER_TIMESTAMP_SIMPLE) {
+                set_logger_mode(LOGGER_TIMESTAMP_COMPLEX);
                 fd_printf(STO, "\r\n*** changed timestamp to complex ***\r\n");
-        } else if (logger_timestamp_e == LOGGER_TIMESTAMP_COMPLEX) {
-                logger_timestamp_e = LOGGER_TIMESTAMP_NONE;
+        } else if (get_logger_mode() == LOGGER_TIMESTAMP_COMPLEX) {
+                set_logger_mode(LOGGER_TIMESTAMP_NONE);
                 fd_printf(STO, "\r\n*** changed timestamp to none ***\r\n");
-        } else if (logger_timestamp_e == LOGGER_TIMESTAMP_NONE) {
-                logger_timestamp_e = LOGGER_TIMESTAMP_SIMPLE;
+        } else if (get_logger_mode() == LOGGER_TIMESTAMP_NONE) {
+                set_logger_mode(LOGGER_TIMESTAMP_SIMPLE);
                 fd_printf(STO, "\r\n*** changed timestamp to simple ***\r\n");
         }
         break;
