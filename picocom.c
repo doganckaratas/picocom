@@ -1560,7 +1560,49 @@ loop(void)
                 n = read(tty_fd, &buff_rd, sizeof(buff_rd));
             } while (n < 0 && errno == EINTR);
             if (n == 0) {
-                fatal("read zero bytes from port");
+                fprintf(stderr, "\r\n*** Disconnected. Waiting for cable to be reconnected, press [C-%c] to exit... ***\r\n", KEYC(opts.escape));
+                close(tty_fd);
+                tty_fd = -1;
+
+                while (tty_fd < 0) {
+                    // Let user send escape and possibly exit while disconnected
+                    fd_set inSet;
+                    struct timeval shortWait = {1, 0};
+                    FD_ZERO(&inSet);
+                    FD_SET(STI, &inSet);
+
+                    int rv = select(STI + 1, &inSet, NULL, NULL, &shortWait);
+                    if (rv > 0 && FD_ISSET(STI, &inSet)) {
+                        char c;
+                        if (read(STI, &c, 1) > 0 && c == opts.escape) {
+                            fprintf(stderr, "\r\n*** Exiting picocom ***\r\n");
+                            cleanup(0, opts.noreset, opts.hangup);
+                            exit(EXIT_SUCCESS);
+                        }
+                    }
+
+                    // Attempt to reopen
+                    tty_fd = open(opts.port, O_RDWR | O_NONBLOCK | O_NOCTTY);
+                    if (tty_fd < 0) {
+                        // Sleep before next retry
+                        sleep(1);
+                        continue;
+                    }
+
+                    // Re-initialize the port as before
+                    if (term_set(tty_fd, 1, opts.baud, opts.parity, opts.databits,
+                                 opts.stopbits, opts.flow, 1, !opts.noreset) < 0) {
+                        close(tty_fd);
+                        tty_fd = -1;
+                        sleep(1);
+                        continue;
+                    }
+                    term_apply(tty_fd, 0);
+                    set_dtr_rts();
+                    fprintf(stderr, "\r\n*** Port reconnected ***\r\n");
+                }
+
+                continue;
             } else if ( n < 0 ) {
                 if ( errno != EAGAIN && errno != EWOULDBLOCK )
                     fatal("read from port failed: %s", strerror(errno));
@@ -2123,9 +2165,48 @@ main (int argc, char *argv[])
             fatal("cannot open %s: %s", opts.log_filename, strerror(errno));
     }
 
-    tty_fd = open(opts.port, O_RDWR | O_NONBLOCK | O_NOCTTY);
-    if (tty_fd < 0)
-        fatal("cannot open %s: %s", opts.port, strerror(errno));
+    tty_fd = -1;
+
+    if (isatty(STI)) {
+        int r = term_add(STI);
+        if (r < 0)
+            fatal("failed to add I/O device: %s", term_strerror(term_errno, errno));
+        term_set_raw(STI);
+        r = term_apply(STI, 0);
+        if (r < 0)
+            fatal("failed to set I/O device to raw mode: %s", term_strerror(term_errno, errno));
+    }
+
+    fprintf(stderr, "\r\n*** Waiting for %s to appear. Press [C-%c] to exit ***\r\n", opts.port, KEYC(opts.escape));
+    while (tty_fd < 0) {
+        tty_fd = open(opts.port, O_RDWR | O_NONBLOCK | O_NOCTTY);
+        if (tty_fd < 0) {
+
+            // Let user type escape from stdin to exit
+            fd_set inSet;
+            struct timeval shortWait = {1, 0};
+            FD_ZERO(&inSet);
+            FD_SET(STI, &inSet);
+
+            int rv = select(STI + 1, &inSet, NULL, NULL, &shortWait);
+            if (rv > 0 && FD_ISSET(STI, &inSet)) {
+                // Read a single char from stdin
+                char c;
+                if (read(STI, &c, 1) > 0 && c == opts.escape) {
+                    fprintf(stderr, "\r\n*** Exiting picocom ***\r\n");
+                    exit(EXIT_SUCCESS);
+                }
+            }
+            continue;
+        }
+    }
+
+    //term_remove(STI) if already added before
+    if (tty_fd >= 0) {
+        r = term_remove(STI);
+        if (r < 0)
+            fatal("failed to remove I/O device: %s", term_strerror(term_errno, errno));
+    }
 
 #ifdef USE_FLOCK
     if ( ! opts.nolock ) {
